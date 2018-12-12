@@ -24,61 +24,53 @@ int squeezeCountSession = 0;
 
 
 
-
-boolean  isSqueezed(){ // k now contains 6
-
+//Determine if the pillow is squeezed
+boolean  isSqueezed(){
   float pressure_hPa = mpr.readPressure();
-   float pressure_PSI = pressure_hPa / 68.947572932;
-
-      
+  float pressure_PSI = pressure_hPa / 68.947572932; 
   if (pressure_PSI >= restingPressure + .02){
         return true;
   }else{
         return false;
-}
+  }
 }
 
 
 void setup() {
-
-
   Serial.begin(115200);
   Serial.println("MPRLS Simple Test");
   if (! mpr.begin()) {
     Serial.println("Failed to communicate with MPRLS sensor, check wiring?");
   }
 
-    
   Serial.println("Found MPRLS sensor");
   analogWrite(heatPin,0);
-
   restingPressure = mpr.readPressure() / 68.947572932;
   Serial.println("RESTING PRESSURE");
   Serial.println(restingPressure);
   
 }
 
-
+boolean heatingMode = false;
 
 void loop() {
+
+
+  heatingMode = CircuitPlayground.slideSwitch();
   float pressure_hPa = mpr.readPressure();
-  Serial.print("Pressure (PSI): "); Serial.println(pressure_hPa / 68.947572932);
   float pressure_PSI = pressure_hPa / 68.947572932;
 
-
-   
   //Hardness of squeezing -> the intensity of the light/vibration (Amplitude)
   //Length of interaction -> the rate of pulsing
 
   float pressureDelta = abs(pressure_PSI - restingPressure);
-  Serial.println("pressureDelta");
-  Serial.println(pressureDelta);
   //Map from .03 -> .12
-  int pressureDeltaInt = (int) (pressureDelta*100); // now i is 3
+  int pressureDeltaInt = (int) (pressureDelta*100); 
   if (pressureDeltaInt > 12){
     pressureDeltaInt = 12;
   }
   int amplitude = map(pressureDeltaInt,2,12,100,255);
+  int lowerBound = (int) floor(amplitude*0.25);
   
   pulseDelay = map(squeezeCountSession,0,60,120,800);
 
@@ -86,20 +78,21 @@ void loop() {
   if (isSqueezed()){
   Serial.println("isSqueezed is true");
     squeezeCountSession++;
-
 //       Activate Heat
-//      analogWrite(heatPin,255);
-      for (int fadeValue = 60 ; fadeValue <= amplitude; fadeValue += 10) {
+      if (heatingMode){
+        analogWrite(heatPin,255);
+      }
+
+      for (int fadeValue = lowerBound ; fadeValue <= amplitude; fadeValue += 10) {
           Serial.println("fading Up");
           analogWrite(ledPin, fadeValue);
           int motorValue = map(fadeValue,0,amplitude,40,255);
-
           analogWrite(motorPin, motorValue);
           delay(pulseDelay);
           
       }
       delay(800);
-      for (int fadeValue = amplitude ; fadeValue >= 60; fadeValue -=20) {
+      for (int fadeValue = amplitude ; fadeValue >= lowerBound; fadeValue -=20) {
         Serial.println("fading down");
         analogWrite(ledPin, fadeValue);
         int motorValue = map(fadeValue,0,amplitude,40,255);
@@ -112,31 +105,34 @@ void loop() {
 
 
   } else {
-    Serial.println("isSqueezed is False");
-    if (squeezeCountSession > 1){
-       squeezeCountSession = 0;
+    //Pillow is not currently squeezed
+    if (squeezeCountSession > 1)
 
         //Initiate a slow windown sequence
        for (int iteration = 0; iteration < 3; iteration++){
-        //Fade from the minimum value of Active state to 0
-          for (int fadeValue = (60-iteration*3) ; fadeValue >= 0; fadeValue -=20) {
-            analogWrite(ledPin, fadeValue);
-             int motorValue = map(fadeValue,0,amplitude,40,255);
-            analogWrite(motorPin, motorValue);
-            delay(pulseDelay);
-
-           if(isSqueezed()){
-                break;
-           }
+         int newAmplitude =  (int) floor(amplitude*(1/(.25+iteration)));
+         if (iteration == 0){
+               newAmplitude = amplitude;
+              //When we get to the end of windown, do a final fadeout
+             for (int fadeValue = lowerBound ; fadeValue >= 0; fadeValue -=10) {
+              analogWrite(ledPin, fadeValue);
+              int motorValue = map(fadeValue,0,amplitude,40,255);
+               analogWrite(motorPin, motorValue);
+               delay(pulseDelay+50*iteration);
+               if(isSqueezed()){
+                    break;
+               }
+             }
+            
           }
-           delay(200);
+
+
           //pulse back up
-          for (int fadeValue = 0 ; fadeValue <= (60-iteration*3); fadeValue += 10) {
+          for (int fadeValue = 0 ; fadeValue <= newAmplitude; fadeValue += 10) {
             analogWrite(ledPin, fadeValue);
              int motorValue = map(fadeValue,0,amplitude,40,255);
             analogWrite(motorPin, motorValue);
-            delay(pulseDelay);
-
+            delay(pulseDelay+50*iteration);
               if(isSqueezed()){
                 break;
               }
@@ -144,42 +140,43 @@ void loop() {
           }
            delay(200);
 
-          if (iteration == 2){
-              //When we get to the end of windown, do a final fadeout
-             for (int fadeValue = (60-iteration*3) ; fadeValue >= 0; fadeValue -=20) {
-              analogWrite(ledPin, fadeValue);
-             int motorValue = map(fadeValue,0,amplitude,0,255);
-            analogWrite(motorPin, motorValue);
-              delay(pulseDelay);
-    
-               if(isSqueezed()){
-                    break;
-               }
-            }
-            
-          }
+        //Fade from high to low
+          for (int fadeValue  = newAmplitude ; fadeValue >= 0; fadeValue -=10) {
 
-          if(isSqueezed()){
+            analogWrite(ledPin, fadeValue);
+            int motorValue = map(fadeValue,0,amplitude,40,255);
+            analogWrite(motorPin, motorValue);
+            delay(pulseDelay+100*iteration);
+
+           if(isSqueezed()){
                 break;
            }
+          }
+           delay(200);
+          if(isSqueezed()){
+                break;
+           } else {
+            squeezeCountSession = 0;
+           }
+
+             
        }
 
     } else if ( squeezeCountSession == 1){
+       //Don't need a full windown session if we only tap the pillow
          squeezeCountSession = 0;
-              //Don't need a full windown session if we tap the pillow
-         for (int fadeValue = (60) ; fadeValue >= 0; fadeValue -=20) {
+         for (int fadeValue = lowerBound ; fadeValue >= 0; fadeValue -=20) {
               analogWrite(ledPin, fadeValue);
              int motorValue = map(fadeValue,0,amplitude,0,255);
-            analogWrite(motorPin, motorValue);
+              analogWrite(motorPin, motorValue);
               delay(pulseDelay);
-    
                if(isSqueezed()){
                     break;
                }
          }
       
     } else {
-
+        //Pillow is not squeezed
         analogWrite(ledPin, 0);
         analogWrite(motorPin, 0);
         analogWrite(heatPin,0);
